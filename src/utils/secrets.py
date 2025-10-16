@@ -6,6 +6,8 @@ import os
 import re
 from typing import Iterable
 
+from pathlib import Path
+
 from dotenv import load_dotenv
 
 _EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -13,7 +15,16 @@ _TRUE_VALUES = {"1", "true", "yes", "y", "on"}
 
 
 def load_env(dotenv_path: str | None = None) -> None:
-    """Load environment variables from a .env file if present."""
+    """Load environment variables from a .env file if present.
+
+    Streamlit can execute pages from nested working directories, so we resolve the
+    repository root relative to this module to locate the default ``.env`` file.
+    """
+
+    if dotenv_path is None:
+        repo_root = Path(__file__).resolve().parents[2]
+        candidate = repo_root / ".env"
+        dotenv_path = str(candidate) if candidate.exists() else None
 
     load_dotenv(dotenv_path=dotenv_path, override=False)
 
