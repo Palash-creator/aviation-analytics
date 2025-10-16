@@ -1,0 +1,12 @@
+[app]
+title = "US Aviation Data — Ingest & Forecast"
+timezone = "America/New_York"
+plotly_template = "plotly_dark"
+default_airports = ["KATL","KDFW","KDEN"]
+ingest_days_back = 730
+
+[paths]
+raw = "data/raw"
+interim = "data/interim"
+processed = "data/processed"
+logs = "logs"
