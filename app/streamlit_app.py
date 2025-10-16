@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.util
-import os
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -11,7 +10,8 @@ from typing import Any
 import plotly.io as pio
 import streamlit as st
 import toml
-from dotenv import load_dotenv
+
+from src.utils.secrets import get_env_bool, load_env
 
 
 def _load_config(path: str = "config.toml") -> dict[str, Any]:
@@ -49,13 +49,12 @@ def _available_pages(is_admin: bool) -> list[dict[str, Any]]:
 
 
 def _render_with_navigation(pages: list[dict[str, Any]], config: dict[str, Any], is_admin: bool) -> None:
-    if hasattr(st, "Page") and hasattr(st, "navigation"):
-        st_pages = [st.Page(str(page["path"]), page["title"], page["icon"]) for page in pages]
-        navigation = st.navigation(st_pages)
-        st.session_state["app_context"] = {"config": config, "is_admin": is_admin}
-        navigation.run()
-    else:
-        choice = st.sidebar.radio("Navigation", [page["title"] for page in pages])
+    def _fallback_render() -> None:
+        titles = [page["title"] for page in pages]
+        choice = st.sidebar.radio("Navigate", titles)
+        if "Admin" in choice and not is_admin:
+            st.error("Admin page is restricted. Set IS_ADMIN=Yes in your .env.")
+            st.stop()
         selected = next(page for page in pages if page["title"] == choice)
         module = _resolve_page_module(selected["path"])
         if hasattr(module, "render"):
@@ -63,11 +62,12 @@ def _render_with_navigation(pages: list[dict[str, Any]], config: dict[str, Any],
         else:
             raise AttributeError(f"Page {selected['path']} missing render() function")
 
+    _fallback_render()
+
 
 def main() -> None:
-    load_dotenv()
+    load_env()
     config = _load_config()
-    is_admin = os.getenv("IS_ADMIN", "").lower() == "yes"
 
     st.set_page_config(
         page_title=config["app"].get("title", "US Aviation Data"),
@@ -75,10 +75,24 @@ def main() -> None:
         initial_sidebar_state="expanded",
         page_icon="✈️",
     )
+
+    is_admin = get_env_bool("IS_ADMIN")
     pio.templates.default = config["app"].get("plotly_template", "plotly_dark")
     st.session_state["app_context"] = {"config": config, "is_admin": is_admin}
 
     pages = _available_pages(is_admin)
+    if hasattr(st, "Page") and hasattr(st, "navigation"):
+        try:
+            st_pages = [
+                st.Page(path=str(page["path"]), title=page["title"], icon=page["icon"])
+                for page in pages
+            ]
+            navigation = st.navigation(pages=st_pages)
+            navigation.run()
+            return
+        except TypeError:
+            pass
+
     _render_with_navigation(pages, config, is_admin)
 
 
