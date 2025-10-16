@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-from io import StringIO
 
 import numpy as np
 import pandas as pd
 import requests
-from tenacity import retry, stop_after_attempt, wait_exponential
+
+from src.utils.http import build_session, get_csv
 
 BASE_URL = "https://www.tsa.gov/sites/default/files/tsa_travel_numbers.csv"
 
@@ -22,12 +22,9 @@ def _synthetic_tsa(start: str, end: str) -> pd.DataFrame:
     return pd.DataFrame({"date": dates.date, "tsa_travelers": values})
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))
 def _download_csv(session: requests.Session | None = None) -> pd.DataFrame:
-    http = session or requests.Session()
-    response = http.get(BASE_URL, timeout=20)
-    response.raise_for_status()
-    return pd.read_csv(StringIO(response.text))
+    http = session or build_session(None)
+    return get_csv(BASE_URL, session=http)
 
 
 def fetch_tsa(start: str, end: str, session: requests.Session | None = None) -> pd.DataFrame:

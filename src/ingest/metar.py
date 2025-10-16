@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from io import StringIO
 
 import numpy as np
 import pandas as pd
 import requests
-from tenacity import retry, stop_after_attempt, wait_exponential
+
+from src.utils.http import build_session, get_csv
 
 BASE_URL = "https://aviationweather.gov/adds/dataserver_current/httpparam"
 
@@ -17,7 +17,6 @@ def _default_headers(user_agent: str | None) -> dict[str, str]:
     return {"User-Agent": user_agent or "aviation-analytics/ingest"}
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=6))
 def _download_metar(
     airport: str,
     start: str,
@@ -33,13 +32,10 @@ def _download_metar(
         "startTime": f"{start}T00:00:00Z",
         "endTime": f"{end}T23:59:59Z",
     }
-    http = session or requests.Session()
-    response = http.get(BASE_URL, params=params, headers=_default_headers(user_agent), timeout=20)
-    response.raise_for_status()
-    text = response.text
-    if "No data available" in text:
+    http = session or build_session(user_agent)
+    data = get_csv(BASE_URL, params=params, headers=_default_headers(user_agent), session=http)
+    if data.empty:
         raise ValueError("No METAR data returned")
-    data = pd.read_csv(StringIO(text))
     return data
 
 

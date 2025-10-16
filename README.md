@@ -48,6 +48,28 @@ Global options live in `config.toml`. Datasets are cached with `st.cache_data` t
 
 Custom validation checks ensure schema integrity, date coverage, duplicate handling, and sanity constraints. Results are surfaced in the UI with indicator visualizations and tabular summaries.
 
+## How to get keys
+
+### Data.gov (BTS On-Time Performance)
+- Sign up for a free account at <https://api.data.gov/signup/>.
+- The API key will arrive via email. Copy it into your `.env` file as `DATA_GOV_API_KEY=your_key`.
+- Supplying a key raises rate limits and enables authenticated BTS OTP API calls.
+
+### NOAA AWC METAR
+- No API key is required, but NOAA expects an identifying email address.
+- Set `NOAA_USER_AGENT=youremail@example.com` in your `.env` and the app will include it in request headers.
+
+### TSA Throughput
+- The TSA checkpoint throughput CSV is public and requires no credentials.
+
+### OpenSky Network (optional)
+- Create a free account at <https://opensky-network.org> to enable trajectory data in future steps.
+- Add `OPENSKY_USER` and `OPENSKY_PASS` to your `.env` once credentials are available.
+
+### FlightAware AeroAPI (optional)
+- Sign up for FlightAware AeroAPI access and generate a developer key.
+- Store the key in `.env` as `FLIGHTAWARE_API_KEY` for later use.
+
 ## License
 
 MIT

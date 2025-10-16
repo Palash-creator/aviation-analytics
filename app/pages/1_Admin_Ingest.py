@@ -5,20 +5,32 @@ from __future__ import annotations
 import hashlib
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
-import requests
 import streamlit as st
 
 from src.ingest import metar, otp, tsa
+from src.utils.http import build_session, get_csv, get_json
 from src.utils.dates import DateWindow, coverage_ratio, window_from_days_back
 from src.utils.io import write_csv, write_manifest, write_parquet
 from src.utils.logging import log_ingest
-from src.utils.plotting import indicator_card, mini_timeseries, status_timeline
+from src.utils.plotting import (
+    build_credential_indicators,
+    indicator_card,
+    mini_timeseries,
+    status_timeline,
+)
+from src.utils.secrets import validate_credentials
 from src.validation.checks import CheckResult, run_all_checks
+
+
+DATA_GOV_PING_URL = "https://api.data.gov/ed/collegescorecard/v1/schools.json"
+NOAA_TEST_STATION = "KATL"
+NOAA_LOOKBACK_HOURS = 6
+TSA_PREVIEW_ROWS = 5
 
 
 @st.cache_data(show_spinner=False)
@@ -39,11 +51,116 @@ def fetch_tsa_cached(start: str, end: str) -> pd.DataFrame:
 
 
 @st.cache_resource(show_spinner=False)
-def _get_http_session(user_agent: str | None) -> requests.Session:
-    session = requests.Session()
-    if user_agent:
-        session.headers.update({"User-Agent": user_agent})
-    return session
+def _get_http_session(user_agent: str | None):
+    return build_session(user_agent)
+
+
+def _format_error(exc: Exception) -> str:
+    message = str(exc)
+    if len(message) > 120:
+        return f"{message[:117]}..."
+    return message
+
+
+def _run_credential_tests() -> list[dict[str, str]]:
+    results: list[dict[str, str]] = []
+
+    data_gov_key = os.getenv("DATA_GOV_API_KEY", "").strip()
+    if data_gov_key:
+        try:
+            get_json(DATA_GOV_PING_URL, params={"per_page": 1})
+            results.append(
+                {
+                    "name": "Data.gov", "status": "OK", "severity": "success",
+                    "message": "API key responded successfully.",
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            results.append(
+                {
+                    "name": "Data.gov", "status": "Error", "severity": "error",
+                    "message": _format_error(exc),
+                }
+            )
+    else:
+        results.append(
+            {
+                "name": "Data.gov", "status": "Skipped", "severity": "warn",
+                "message": "Optional key not configured; using public endpoints.",
+            }
+        )
+
+    noaa_user_agent = os.getenv("NOAA_USER_AGENT", "").strip()
+    if not noaa_user_agent or "@" not in noaa_user_agent:
+        results.append(
+            {
+                "name": "NOAA METAR", "status": "Invalid", "severity": "error",
+                "message": "Set NOAA_USER_AGENT to a valid email for authenticated requests.",
+            }
+        )
+    else:
+        end_time = datetime.utcnow()
+        start_time = end_time - timedelta(hours=NOAA_LOOKBACK_HOURS)
+        params = {
+            "dataSource": "metars",
+            "requestType": "retrieve",
+            "format": "csv",
+            "stationString": NOAA_TEST_STATION,
+            "startTime": start_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "endTime": end_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        try:
+            session = _get_http_session(noaa_user_agent)
+            df = get_csv(metar.BASE_URL, params=params, headers={"User-Agent": noaa_user_agent}, session=session)
+            if df.empty:
+                results.append(
+                    {
+                        "name": "NOAA METAR", "status": "No data", "severity": "warn",
+                        "message": "No recent METAR observations returned for test station.",
+                    }
+                )
+            else:
+                results.append(
+                    {
+                        "name": "NOAA METAR", "status": "OK", "severity": "success",
+                        "message": f"Received {len(df)} observations for {NOAA_TEST_STATION}.",
+                    }
+                )
+        except Exception as exc:  # noqa: BLE001
+            results.append(
+                {
+                    "name": "NOAA METAR", "status": "Error", "severity": "error",
+                    "message": _format_error(exc),
+                }
+            )
+
+    try:
+        session = _get_http_session(None)
+        tsa_df = get_csv(tsa.BASE_URL, session=session)
+        preview = len(tsa_df.head(TSA_PREVIEW_ROWS))
+        if preview:
+            results.append(
+                {
+                    "name": "TSA Throughput", "status": "OK", "severity": "success",
+                    "message": f"Fetched {preview} sample rows from TSA CSV.",
+                }
+            )
+        else:
+            results.append(
+                {
+                    "name": "TSA Throughput", "status": "Empty", "severity": "warn",
+                    "message": "CSV returned no rows during test.",
+                }
+            )
+    except Exception as exc:  # noqa: BLE001
+        results.append(
+            {
+                "name": "TSA Throughput", "status": "Error", "severity": "error",
+                "message": _format_error(exc),
+            }
+        )
+
+    return results
 
 
 def _hash_dataframe(df: pd.DataFrame) -> str:
@@ -209,6 +326,29 @@ def render(config: dict[str, Any], is_admin: bool) -> None:
         st.stop()
 
     st.title("Admin · Ingest")
+
+    credential_statuses = validate_credentials()
+    st.subheader("Credential status")
+    st.plotly_chart(build_credential_indicators(credential_statuses), use_container_width=True)
+
+    if any(status["name"] == "NOAA User-Agent" and status["severity"] == "error" for status in credential_statuses):
+        st.error(
+            "NOAA User-Agent is missing or invalid. Update NOAA_USER_AGENT in your .env "
+            "to avoid NOAA API rejections."
+        )
+
+    if "credential_tests" not in st.session_state:
+        st.session_state["credential_tests"] = None
+
+    if st.button("Test Credentials"):
+        with st.spinner("Running credential smoke tests..."):
+            st.session_state["credential_tests"] = _run_credential_tests()
+
+    if st.session_state.get("credential_tests"):
+        st.plotly_chart(
+            build_credential_indicators(st.session_state["credential_tests"]),
+            use_container_width=True,
+        )
 
     timezone = config["app"].get("timezone", "UTC")
     default_days = int(config["app"].get("ingest_days_back", 365))

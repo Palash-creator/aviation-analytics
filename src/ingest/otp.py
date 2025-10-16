@@ -15,9 +15,9 @@ from typing import Iterable
 
 import numpy as np
 import pandas as pd
-from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.utils.dates import date_range
+from src.utils.http import build_session, get_json
 
 SAMPLE_URL = "https://raw.githubusercontent.com/vega/vega-datasets/master/data/flights-5k.json"
 
@@ -30,11 +30,12 @@ def _icao_to_iata(airport: str) -> str:
     return airport
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))
 def _download_sample() -> pd.DataFrame:
     """Download a small public flight sample."""
 
-    df = pd.read_json(SAMPLE_URL)
+    session = build_session()
+    data = get_json(SAMPLE_URL, session=session)
+    df = pd.DataFrame(data)
     df["FlightDate"] = pd.to_datetime(df["date"]).dt.date
     df.rename(columns={"origin": "Origin", "destination": "Dest"}, inplace=True)
     df["Cancelled"] = 0
