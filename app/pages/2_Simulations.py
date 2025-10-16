@@ -7,7 +7,9 @@ from typing import Any
 
 import pandas as pd
 import streamlit as st
+import toml
 
+from src.utils.secrets import get_env_bool, load_env
 from src.utils.plotting import mini_timeseries
 
 
@@ -36,3 +38,26 @@ def render(config: dict[str, Any], is_admin: bool) -> None:
     totals = otp_df.groupby("date")["movements"].sum().reset_index()
     fig = mini_timeseries(totals, x="date", y="movements", title="Daily Movements – Preview")
     st.plotly_chart(fig, use_container_width=True)
+
+
+def _resolve_context() -> tuple[dict[str, Any], bool]:
+    context = st.session_state.get("app_context")
+    if context:
+        return context["config"], context["is_admin"]
+
+    load_env()
+    config_path = Path(__file__).resolve().parents[1] / "config.toml"
+    with config_path.open("r", encoding="utf-8") as handle:
+        config = toml.load(handle)
+    return config, get_env_bool("IS_ADMIN")
+
+
+def _auto_render() -> None:
+    if st.session_state.get("_manual_page_render"):
+        return
+
+    config, is_admin = _resolve_context()
+    render(config=config, is_admin=is_admin)
+
+
+_auto_render()

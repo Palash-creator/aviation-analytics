@@ -61,11 +61,15 @@ def _render_with_navigation(pages: list[dict[str, Any]], config: dict[str, Any],
             st.error("Admin page is restricted. Set IS_ADMIN=Yes in your .env.")
             st.stop()
         selected = next(page for page in pages if page["title"] == choice)
+        st.session_state["_manual_page_render"] = True
         module = _resolve_page_module(selected["path"])
-        if hasattr(module, "render"):
-            module.render(config=config, is_admin=is_admin)
-        else:
-            raise AttributeError(f"Page {selected['path']} missing render() function")
+        try:
+            if hasattr(module, "render"):
+                module.render(config=config, is_admin=is_admin)
+            else:
+                raise AttributeError(f"Page {selected['path']} missing render() function")
+        finally:
+            st.session_state.pop("_manual_page_render", None)
 
     _fallback_render()
 

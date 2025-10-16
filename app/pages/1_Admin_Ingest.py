@@ -11,10 +11,11 @@ from typing import Any
 
 import pandas as pd
 import streamlit as st
+import toml
 
 from src.ingest import metar, otp, tsa
-from src.utils.http import build_session, get_csv, get_json
 from src.utils.dates import DateWindow, coverage_ratio, window_from_days_back
+from src.utils.http import build_session, get_csv, get_json
 from src.utils.io import write_csv, write_manifest, write_parquet
 from src.utils.logging import log_ingest
 from src.utils.plotting import (
@@ -23,7 +24,7 @@ from src.utils.plotting import (
     mini_timeseries,
     status_timeline,
 )
-from src.utils.secrets import validate_credentials
+from src.utils.secrets import get_env_bool, load_env, validate_credentials
 from src.validation.checks import CheckResult, run_all_checks
 
 
@@ -522,3 +523,26 @@ def render(config: dict[str, Any], is_admin: bool) -> None:
 
     if "ingest_data" in st.session_state and not run_button and not rerun_checks:
         _display_results(st.session_state["ingest_data"])
+
+
+def _resolve_context() -> tuple[dict[str, Any], bool]:
+    context = st.session_state.get("app_context")
+    if context:
+        return context["config"], context["is_admin"]
+
+    load_env()
+    config_path = Path(__file__).resolve().parents[1] / "config.toml"
+    with config_path.open("r", encoding="utf-8") as handle:
+        config = toml.load(handle)
+    return config, get_env_bool("IS_ADMIN")
+
+
+def _auto_render() -> None:
+    if st.session_state.get("_manual_page_render"):
+        return
+
+    config, is_admin = _resolve_context()
+    render(config=config, is_admin=is_admin)
+
+
+_auto_render()
