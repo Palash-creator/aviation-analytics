@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import sys
 from types import ModuleType
 from typing import Any
 
 import plotly.io as pio
 import streamlit as st
 import toml
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from src.utils.secrets import get_env_bool, load_env
 
